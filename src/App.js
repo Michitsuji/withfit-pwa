@@ -1107,19 +1107,10 @@ export default function App() {
       if (docSnap.exists()) accountData = docSnap.data();
     } catch(e) { return false; }
     const joinedGyms = accountData?.joinedGyms || ['common'];
-    if (pin === 'google') {
-      if (!accountData) {
-        const accountsSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'accounts'));
-        if (accountsSnap.size >= 10) { alert("ユーザー数が上限（10人）に達しているため、新規登録できません。"); return false; }
-        try {
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'accounts', username), { displayName: '新規ユーザー', isTraining: false, lastActive: Date.now(), isAppOnline: true, theme: 'light', friends: [], joinedGyms: ['common'] }, { merge: true });
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'privateAccounts', username), { friendCode: generateFriendCode() }, { merge: true });
-          setCurrentUser(username);
-        } catch (e) { return false; }
-      } else {
-        setCurrentUser(username);
-        try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'accounts', username), { lastActive: Date.now(), isAppOnline: true, joinedGyms }, { merge: true }); } catch (e) {}
-      }
+    // かつて存在した「PIN欄に google と入れるとユーザー名だけで入れる」分岐は
+    // なりすましに使えるため廃止した。存在しないアカウントではログインできない
+    if (!accountData) {
+      return false;
     } else {
       // PIN照合はサーバー側（/api/pinLogin）で行う。成功すると正式なセッションが得られる
       try {
