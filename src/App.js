@@ -1464,12 +1464,15 @@ export default function App() {
 
   const handleSaveProfile = async (data, shouldClose = true) => {
     if (!currentUser || !db) return;
-    // 生年月日はログイン情報の一部なので秘密情報側（privateAccounts）に保存する
-    const { birthDate, ...profileData } = data || {};
+    // 生年月日はログイン情報、体重は健康情報なので、どちらも秘密情報側（privateAccounts）に保存する
+    const { birthDate, weight, ...profileData } = data || {};
     try {
       await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'accounts', currentUser), profileData, { merge: true });
-      if (birthDate !== undefined) {
-        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'privateAccounts', currentUser), { birthDate: birthDate || '' }, { merge: true }).catch(() => {});
+      if (birthDate !== undefined || weight !== undefined) {
+        const priv = {};
+        if (birthDate !== undefined) priv.birthDate = birthDate || '';
+        if (weight !== undefined) priv.weight = weight ?? null;
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'privateAccounts', currentUser), priv, { merge: true }).catch(() => {});
       }
       if (shouldClose) setShowProfileModal(false);
     } catch (e) {}
