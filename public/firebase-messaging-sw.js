@@ -12,17 +12,24 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-firebase.initializeApp({
-  apiKey: "AIzaSyDQTfLhyuc8PEoMtw-FvEq4k9HShRJz_io",
-  authDomain: "duofit-app-75cb2.firebaseapp.com",
-  projectId: "duofit-app-75cb2",
-  storageBucket: "duofit-app-75cb2.firebasestorage.app",
-  messagingSenderId: "949622687026",
-  appId: "1:949622687026:web:bcc53a734a31fc1a2a432b",
-});
+// Firebase 設定はソースコードに直接書かず、アプリが登録時にクエリパラメータで渡す
+const swParams = new URLSearchParams(self.location.search);
+const swConfig = {
+  apiKey: swParams.get('apiKey') || '',
+  authDomain: swParams.get('authDomain') || '',
+  projectId: swParams.get('projectId') || '',
+  storageBucket: swParams.get('storageBucket') || '',
+  messagingSenderId: swParams.get('messagingSenderId') || '',
+  appId: swParams.get('appId') || '',
+};
 
-const messaging = firebase.messaging();
+let messaging = null;
+if (swConfig.apiKey) {
+  firebase.initializeApp(swConfig);
+  messaging = firebase.messaging();
+}
 
+if (messaging) {
 // データのみ（data-only）のペイロードが届いた場合のフォールバック表示
 messaging.onBackgroundMessage((payload) => {
   if (payload && payload.notification) {
@@ -40,6 +47,7 @@ messaging.onBackgroundMessage((payload) => {
   };
   self.registration.showNotification(title, options);
 });
+}
 
 // 通知タップ時にアプリをフォーカスまたは起動して対象画面へ遷移
 self.addEventListener('notificationclick', (event) => {

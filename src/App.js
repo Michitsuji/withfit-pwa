@@ -6,7 +6,7 @@ import { Activity, Bell, Heart, MessageCircle, UserPlus, LogOut, Flame, ChevronR
 import { GoogleAuthProvider, signInWithCredential, getRedirectResult, signInAnonymously, onAuthStateChanged, signInWithPopup, signInWithCustomToken } from 'firebase/auth';
 import { setDoc, doc, getDoc, deleteField, collection, onSnapshot, query, where, getDocs, limit, deleteDoc } from 'firebase/firestore';
 import { getMessaging, getToken, onMessage, isSupported } from 'firebase/messaging';
-import { db, appId, auth, app } from './firebase';
+import { db, appId, auth, app, firebaseConfig } from './firebase';
 import { generateId, generateFriendCode, calculateWorkoutTotals, getRelativeTime, getAge } from './utils';
 import { useAutoScrollDisable, WithFitLogo, UserAvatar, renderUsernameWithBadge, TimerDisplay, NavButton, RecordWheelWrapper } from './CommonUI';
 import { TimelineView, WorkoutCard } from './WorkoutCard';
@@ -128,7 +128,13 @@ export default function App() {
       let swReg = null;
       if ('serviceWorker' in navigator) {
         try {
-          swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
+          // Firebase 設定はソースに書かず、登録時にクエリで Service Worker へ渡す
+          const swParams = new URLSearchParams();
+          ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'].forEach((k) => {
+            if (firebaseConfig && firebaseConfig[k]) swParams.set(k, firebaseConfig[k]);
+          });
+          const swUrl = '/firebase-messaging-sw.js' + (swParams.toString() ? '?' + swParams.toString() : '');
+          swReg = await navigator.serviceWorker.register(swUrl, { scope: '/' });
           await navigator.serviceWorker.ready;
         } catch (swErr) {
           console.warn('Service worker registration warning:', swErr);
