@@ -367,18 +367,22 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ success: false, message: 'targetUserId is required' });
     }
 
-    // 送信先トークンはサーバー側でアカウント情報から解決する
+    // 送信先トークンはサーバー側で解決する。秘密情報の分離後は privateAccounts が正だが、
+    // 移行期間中は accounts 側にも残るため両方を union する
     let tokens = [];
     try {
       const { getFirestore } = require('firebase-admin/firestore');
-      const accSnap = await getFirestore().doc(`artifacts/withfit-app/public/data/accounts/${targetUserId}`).get();
-      if (accSnap.exists) {
-        const acc = accSnap.data() || {};
-        tokens = [...new Set([
-          ...(Array.isArray(acc.fcmTokens) ? acc.fcmTokens : []),
-          acc.fcmToken
-        ].filter(t => typeof t === 'string' && t.trim().length > 0))];
-      }
+      const db = getFirestore();
+      const [privSnap, accSnap] = await Promise.all([
+        db.doc(`artifacts/withfit-app/public/data/privateAccounts/${targetUserId}`).get(),
+        db.doc(`artifacts/withfit-app/public/data/accounts/${targetUserId}`).get()
+      ]);
+      const collect = (d) => d && d.exists ? [
+        ...(Array.isArray((d.data() || {}).fcmTokens) ? d.data().fcmTokens : []),
+        (d.data() || {}).fcmToken
+      ] : [];
+      tokens = [...new Set([...collect(privSnap), ...collect(accSnap)]
+        .filter(t => typeof t === 'string' && t.trim().length > 0))];
     } catch (e) {
       console.error('Token lookup failed:', e);
     }
@@ -394,23 +398,28 @@ module.exports = async function handler(req, res) {
     try {
       const { successCount, failureCount, invalidTokens } = await deliverTokens(tokens, safeTitle, safeBody, safeData);
 
-      // 無効トークンの掃除もサーバー側で行う
+      // 無効トークンの掃除もサーバー側で行う（privateAccounts と accounts の両方から除去）
       if (invalidTokens.length > 0) {
         try {
           const { getFirestore, FieldValue } = require('firebase-admin/firestore');
-          const ref = getFirestore().doc(`artifacts/withfit-app/public/data/accounts/${targetUserId}`);
-          const snap2 = await ref.get();
-          if (snap2.exists) {
-            const acc2 = snap2.data() || {};
-            const current = [...new Set([
-              ...(Array.isArray(acc2.fcmTokens) ? acc2.fcmTokens : []),
-              acc2.fcmToken
-            ].filter(t => typeof t === 'string' && t.trim().length > 0))];
-            const valid = current.filter(t => !invalidTokens.includes(t));
-            await ref.update({
-              fcmTokens: valid,
-              fcmToken: valid.length > 0 ? valid[valid.length - 1] : FieldValue.delete()
-            });
+          const db2 = getFirestore();
+          for (const collName of ['privateAccounts', 'accounts']) {
+            const ref = db2.doc(`artifacts/withfit-app/public/data/${collName}/${targetUserId}`);
+            const snap2 = await ref.get();
+            if (snap2.exists) {
+              const acc2 = snap2.data() || {};
+              const current = [...new Set([
+                ...(Array.isArray(acc2.fcmTokens) ? acc2.fcmTokens : []),
+                acc2.fcmToken
+              ].filter(t => typeof t === 'string' && t.trim().length > 0))];
+              if (current.some(t => invalidTokens.includes(t))) {
+                const valid = current.filter(t => !invalidTokens.includes(t));
+                await ref.update({
+                  fcmTokens: valid,
+                  fcmToken: valid.length > 0 ? valid[valid.length - 1] : FieldValue.delete()
+                });
+              }
+            }
           }
         } catch (e) {
           console.warn('Token cleanup failed:', e);
@@ -438,13 +447,16 @@ module.exports = async function handler(req, res) {
   let registered = new Set();
   try {
     const { getFirestore } = require('firebase-admin/firestore');
-    const snap = await getFirestore().collection('artifacts/withfit-app/public/data/accounts').get();
-    snap.forEach(d => {
-      const a = d.data() || {};
-      [...(Array.isArray(a.fcmTokens) ? a.fcmTokens : []), a.fcmToken].forEach(t => {
-        if (typeof t === 'string' && t.trim().length > 0) registered.add(t);
+    const db3 = getFirestore();
+    for (const collName of ['accounts', 'privateAccounts']) {
+      const snap = await db3.collection(`artifacts/withfit-app/public/data/${collName}`).get();
+      snap.forEach(d => {
+        const a = d.data() || {};
+        [...(Array.isArray(a.fcmTokens) ? a.fcmTokens : []), a.fcmToken].forEach(t => {
+          if (typeof t === 'string' && t.trim().length > 0) registered.add(t);
+        });
       });
-    });
+    }
   } catch (e) {
     console.error('Registered token lookup failed:', e);
     return res.status(500).json({ success: false, error: 'token lookup failed' });
