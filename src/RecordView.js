@@ -1053,6 +1053,11 @@ function RecordView({ onStart, onPost, onCancel, onRequestJointTraining, onAccep
         
         {/* プログラム作成機能 */}
         <div className="mt-6 w-full">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
+               <Target size={16} className="text-indigo-500" /> プログラム管理
+            </h3>
+          </div>
           
           {activeProgramsList.map(prog => (
             <ActiveProgramDisplay 
