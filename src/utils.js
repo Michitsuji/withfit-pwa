@@ -35,7 +35,14 @@ const getCategoryTabColor = (category, isSelected) => {
 
 // --- 計算ユーティリティ ---
 const generateId = () => Date.now().toString() + Math.random().toString(36).substring(2, 9);
-const generateFriendCode = () => Math.floor(10000 + Math.random() * 90000).toString();
+const generateFriendCode = () => {
+  // フレンドコードはログイン認証情報そのものなので、推測されにくい8文字の英数字にする
+  // （紛らわしい文字 0/O/1/I/L は除外。旧形式の5桁数字コードも既存ユーザーはそのまま使える）
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+};
 
 const generateColor = (str) => {
   let hash = 0;
