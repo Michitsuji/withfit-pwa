@@ -5,13 +5,15 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 
+
 // --- Firebase 初期化 ---
 let app, auth, db, appId = 'withfit-app';
 const FIREBASE_PROJECT_ID = "duofit-app-75cb2";
 
+
 try {
   const firebaseConfig = {
-    apiKey: "AIzaSyDQTfLhyuc8PEoMtw-FvEq4k9HShRJz_io",
+    apiKey: "AIzaSyAb2qyieNxcnStpI94ETyD9HDtPseOYwd8",
     authDomain: "duofit-app-75cb2.firebaseapp.com",
     projectId: "duofit-app-75cb2",
     storageBucket: "duofit-app-75cb2.firebasestorage.app",
@@ -23,6 +25,7 @@ try {
   auth = getAuth(app);
   db = getFirestore(app);
 
+
   if (typeof window !== 'undefined') {
     enableIndexedDbPersistence(db).catch((err) => {
       console.warn("Offline persistence error:", err.code);
@@ -31,6 +34,7 @@ try {
 } catch (error) {
   console.error("Firebase initialization error:", error);
 }
+
 
 export {
   app,
