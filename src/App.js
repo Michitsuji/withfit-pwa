@@ -16,7 +16,7 @@ import { RecordView } from './RecordView';
 import { ExercisesView } from './ExercisesView';
 import { FriendsView, FriendDetailModal } from './FriendsView';
 import { LoginScreen, ProfileModal, UserProfileModal } from './ProfileModals';
-import { CoachChatModal, SecretGame } from './CoachAndGame';
+import {  SecretGame } from './CoachAndGame';
 
 const VAPID_PUBLIC_KEY = 'BAty8GYk1zuoZVh-ZaSdcJsq_o-7vXJLXPNVNzlgsq9rd3wP-jQtclYEdu1MnnLN_0BnlmiKuoWH3X2YvOFl7aM';
 const DEVICE_TOKEN_STORAGE_KEY = 'withfit_device_fcm_token';
@@ -285,8 +285,7 @@ export default function App() {
   const [pushPromptType, setPushPromptType] = useState('request');
   const [osPermission, setOsPermission] = useState('default');
 
-  const [showCoachChat, setShowCoachChat] = useState(false);
-
+ 
   const [restDuration, setRestDuration] = useState(0);
   const [restTimerStart, setRestTimerStart] = useState(null);
   const [restTimeLeft, setRestTimeLeft] = useState(0);
@@ -2538,7 +2537,7 @@ export default function App() {
         {currentTab === 'timeline' && <TimelineView posts={visiblePosts} onToggleLike={toggleLike} onImport={handleImportWorkout} onImportItem={handleImportExerciseItem} currentUser={currentUser} onDelete={handleDeleteWorkout} onEdit={setEditingPost} accountsInfo={accountsInfo} onAddComment={handleAddComment} onDeleteComment={handleDeleteComment} onToggleCommentLike={handleToggleCommentLike} onUserClick={setSelectedUserProfile} scrollToPostId={scrollToPostId} setScrollToPostId={setScrollToPostId} />}
         {currentTab === 'exercises' && <ExercisesView gyms={allGyms} exercises={exercises} posts={visiblePosts} accountsInfo={accountsInfo} currentUser={currentUser} myInfo={myInfo} setCurrentTab={setCurrentTab} onSendRequest={handleSendFriendRequest} onUserClick={setSelectedUserProfile} />}
         {currentTab === 'record' && <RecordView onStart={handleStartTraining} onPost={handlePostWorkout} onCancel={handleCancelTraining} onRequestJointTraining={handleRequestJointTraining} onAcceptJointTraining={handleAcceptJointTraining} onRejectJointTraining={handleRejectJointTraining} onCancelJointTraining={handleCancelJointTraining} onImportItem={handleImportExerciseItem} myInfo={myInfo} gyms={allGyms} exercises={exercises} workoutItems={draftWorkoutItems} setWorkoutItems={setDraftWorkoutItems} selectedCategories={selectedCategories} setSelectedCategories={setSelectedCategories} posts={visiblePosts} currentUser={currentUser} isManual={isRecordManual} setIsManual={setIsRecordManual} onActiveExerciseChange={handleActiveExerciseChange} accountsInfo={accountsInfo} />}
-        {currentTab === 'data' && <DataView posts={posts} currentUser={currentUser} accountsInfo={accountsInfo} onEdit={setEditingPost} onDelete={handleDeleteWorkout} onImport={handleImportWorkout} onImportItem={handleImportExerciseItem} onAddComment={handleAddComment} onDeleteComment={handleDeleteComment} onToggleCommentLike={handleToggleCommentLike} onUserClick={setSelectedUserProfile} onOpenCoach={() => setShowCoachChat(true)} />}
+        {currentTab === 'data' && <DataView posts={posts} currentUser={currentUser} accountsInfo={accountsInfo} onEdit={setEditingPost} onDelete={handleDeleteWorkout} onImport={handleImportWorkout} onImportItem={handleImportExerciseItem} onAddComment={handleAddComment} onDeleteComment={handleDeleteComment} onToggleCommentLike={handleToggleCommentLike} onUserClick={setSelectedUserProfile}  />}
         {currentTab === 'friends' && <FriendsView currentUser={currentUser} myInfo={myInfo} accountsInfo={accountsInfo} onSendRequest={handleSendFriendRequest} onAccept={handleAcceptFriendRequest} onReject={handleRejectFriendRequest} onRemoveFriend={handleRemoveFriend} onSendPartnerRequest={handleSendPartnerRequest} onAcceptPartnerRequest={handleAcceptPartnerRequest} onRejectPartnerRequest={handleRejectPartnerRequest} onRemovePartner={handleRemovePartner} onFriendClick={(u) => setSelectedFriendUser(u)} onGenerateFriendCode={handleGenerateFriendCode} posts={posts} targetFriendTab={targetFriendTab} setTargetFriendTab={setTargetFriendTab} onImport={handleImportWorkout} onImportItem={handleImportExerciseItem} onSendTestPush={async (targetUser, message) => {
           if (!db || !targetUser || !message) return;
           const res = await sendNotification(
@@ -2639,8 +2638,7 @@ export default function App() {
         pushStatus={pushStatus}
       />
       <UserProfileModal isOpen={!!selectedUserProfile} onClose={() => setSelectedUserProfile(null)} targetUser={selectedUserProfile} accountsInfo={accountsInfo} currentUser={currentUser} onSendRequest={handleSendFriendRequest} />
-      <CoachChatModal isOpen={showCoachChat} onClose={() => setShowCoachChat(false)} currentUser={currentUser} accountsInfo={accountsInfo} posts={posts} appId={appId} />
-      {showSecretGame && <SecretGame onClose={() => setShowSecretGame(false)} currentUser={currentUser} accountsInfo={accountsInfo} appId={appId} />}
+       {showSecretGame && <SecretGame onClose={() => setShowSecretGame(false)} currentUser={currentUser} accountsInfo={accountsInfo} appId={appId} />}
     </div>
   );
 }
