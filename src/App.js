@@ -4,7 +4,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Activity, Bell, Heart, MessageCircle, UserPlus, LogOut, Flame, ChevronRight, ChevronLeft, MapPin, Clock, VolumeX, Volume2, X, Play, Lock, Home, Dumbbell, PlusCircle, Users, Settings, Calendar as CalendarIcon } from 'lucide-react';
 import { GoogleAuthProvider, signInWithCredential, getRedirectResult, signInAnonymously, onAuthStateChanged, signInWithPopup, signInWithCustomToken } from 'firebase/auth';
-import { setDoc, doc, getDoc, deleteField, collection, onSnapshot, query, orderBy, where, getDocs, limit, deleteDoc } from 'firebase/firestore';
+import { setDoc, doc, getDoc, deleteField, collection, onSnapshot, query, where, getDocs, limit, deleteDoc } from 'firebase/firestore';
 import { getMessaging, getToken, onMessage, isSupported } from 'firebase/messaging';
 import { db, appId, auth, app, firebaseConfig } from './firebase';
 import { generateId, generateFriendCode, calculateWorkoutTotals, getRelativeTime, getAge } from './utils';
@@ -961,9 +961,6 @@ export default function App() {
   }, [db, currentUser, accountsInfo[currentUser]?.joinedGyms?.join(','), (accountsInfo[currentUser]?.friends || []).map(f => accountsInfo[f]?.joinedGyms?.join(',')).join('|')]);
 
   const postsByChunkRef = useRef({});
-  const fullHistoryRef = useRef(null);
-  const fullHistoryBusyRef = useRef(false);
-  const ensureFullHistoryRef = useRef(null);
 
   useEffect(() => {
     if (!db) return;
@@ -980,44 +977,17 @@ export default function App() {
     }
     
     const workoutsRef = collection(db, 'artifacts', appId, 'public', 'data', 'workouts');
-
-    const rebuildPosts = () => {
-      const byId = new Map();
-      if (fullHistoryRef.current) {
-        fullHistoryRef.current.forEach((p) => byId.set(p.id, p));
-      }
-      Object.values(postsByChunkRef.current).flat().forEach((p) => byId.set(p.id, p));
-      const allPosts = Array.from(byId.values());
-      allPosts.sort((a, b) => b.timestamp - a.timestamp);
-      setPosts(allPosts);
-    };
-
-    // 全履歴は必要になった時だけ一括取得する（起動時は直近分だけ読んで軽くする）
-    ensureFullHistoryRef.current = async () => {
-      if (fullHistoryRef.current || fullHistoryBusyRef.current) return;
-      fullHistoryBusyRef.current = true;
-      try {
-        const map = new Map();
-        for (const chunk of chunks) {
-          const snap = await getDocs(query(workoutsRef, where('author', 'in', chunk)));
-          snap.forEach(d => map.set(d.id, { id: d.id, ...d.data() }));
-        }
-        fullHistoryRef.current = map;
-        rebuildPosts();
-      } catch (e) {
-        console.error(e);
-      } finally {
-        fullHistoryBusyRef.current = false;
-      }
-    };
-
     const unsubs = chunks.map((chunk, index) => {
-      const q = query(workoutsRef, where('author', 'in', chunk), orderBy('timestamp', 'desc'), limit(60));
+      const q = query(workoutsRef, where('author', 'in', chunk));
       return onSnapshot(q, (snapshot) => {
         const chunkData = []; 
         snapshot.forEach(doc => { chunkData.push({ id: doc.id, ...doc.data() }); });
         postsByChunkRef.current[index] = chunkData;
-        rebuildPosts();
+        
+        const allPosts = Object.values(postsByChunkRef.current).flat();
+        allPosts.sort((a, b) => b.timestamp - a.timestamp);
+        
+        setPosts(allPosts);
         setDataLoaded(prev => ({ ...prev, workouts: true }));
       }, (err) => {
         console.error(err);
@@ -1028,25 +998,8 @@ export default function App() {
     return () => {
        unsubs.forEach(unsub => unsub());
        postsByChunkRef.current = {};
-       fullHistoryRef.current = null;
-       fullHistoryBusyRef.current = false;
-       ensureFullHistoryRef.current = null;
     };
   }, [db, currentUser, accountsInfo[currentUser]?.friends?.join(',')]);
-
-  // 全履歴が要る画面（データ・フレンド・プロフィール）を開いたら裏で読み込む
-  useEffect(() => {
-    if (currentTab === 'data' || currentTab === 'friends' || selectedFriendUser || selectedUserProfile) {
-      if (ensureFullHistoryRef.current) ensureFullHistoryRef.current();
-    }
-  }, [currentTab, selectedFriendUser, selectedUserProfile]);
-
-  // 起動が落ち着いたら全履歴も裏で揃える（クエスト等の集計を従来どおりにするため）
-  useEffect(() => {
-    if (!currentUser) return;
-    const t = setTimeout(() => { if (ensureFullHistoryRef.current) ensureFullHistoryRef.current(); }, 10000);
-    return () => clearTimeout(t);
-  }, [currentUser]);
 
   useEffect(() => {
     if (!db) return;
