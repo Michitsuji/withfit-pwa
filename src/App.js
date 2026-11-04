@@ -3,7 +3,7 @@
 // ==========================================
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Activity, Bell, Heart, MessageCircle, UserPlus, LogOut, Flame, ChevronRight, ChevronLeft, MapPin, Clock, VolumeX, Volume2, X, Play, Lock, Home, Dumbbell, PlusCircle, Users, Settings, Calendar as CalendarIcon } from 'lucide-react';
-import { GoogleAuthProvider, signInWithCredential, getRedirectResult, signInAnonymously, onAuthStateChanged, signInWithPopup, signInWithCustomToken } from 'firebase/auth';
+import { GoogleAuthProvider, signInWithCredential, getRedirectResult, signInAnonymously, onAuthStateChanged, signInWithPopup, signInWithCustomToken, signOut } from 'firebase/auth';
 import { setDoc, doc, getDoc, deleteField, collection, onSnapshot, query, where, getDocs, limit, deleteDoc } from 'firebase/firestore';
 import { getMessaging, getToken, onMessage, isSupported } from 'firebase/messaging';
 import { db, appId, auth, app, firebaseConfig } from './firebase';
@@ -788,6 +788,8 @@ export default function App() {
 
   useEffect(() => {
     if (firebaseUser && !firebaseUser.isAnonymous && dataLoaded.accounts && !currentUser) {
+      // 明示ログアウト直後は、残っている認証セッションから前のユーザーを自動復元しない
+      try { if (localStorage.getItem('withfit_explicit_logout')) return; } catch (e) {}
       handleGoogleLogin(firebaseUser);
     }
   }, [firebaseUser, dataLoaded.accounts, currentUser]);
@@ -1114,6 +1116,8 @@ export default function App() {
       } catch (e) {
         if (!cancelled && e && e.code === 'permission-denied') {
           try { localStorage.removeItem('withfit_login_session'); } catch (err) {}
+          // 自動復元の対象からも外す（残った認証セッションから前のユーザーが戻らないように）
+          try { localStorage.setItem('withfit_explicit_logout', '1'); } catch (err) {}
           setCurrentUser(null);
           alert('ログインセッションの有効期限が切れていました。お手数ですが、フレンドコードと生年月日でもう一度ログインしてください。');
         }
@@ -1238,6 +1242,8 @@ export default function App() {
           if (j && j.token) {
             await signInWithCustomToken(auth, j.token);
             setCurrentUser(username);
+            try { localStorage.removeItem('withfit_explicit_logout'); } catch (e) {}
+            localStorage.setItem('withfit_login_session', JSON.stringify({ userId: username, lastActive: Date.now() }));
             try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'accounts', username), { lastActive: Date.now(), isAppOnline: true, joinedGyms }, { merge: true }); } catch (e) {}
             return true;
           }
@@ -1249,6 +1255,8 @@ export default function App() {
         return false;
       } else if (accountData.pin === pin) {
         setCurrentUser(username);
+        try { localStorage.removeItem('withfit_explicit_logout'); } catch (e) {}
+        localStorage.setItem('withfit_login_session', JSON.stringify({ userId: username, lastActive: Date.now() }));
         try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'accounts', username), { lastActive: Date.now(), isAppOnline: true, joinedGyms }, { merge: true }); } catch (e) {}
       } else { return false; }
     }
@@ -1296,6 +1304,7 @@ export default function App() {
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'uidMap', googleUser.uid), { username }, { merge: true });
       } catch (e) {}
       setCurrentUser(username);
+      try { localStorage.removeItem('withfit_explicit_logout'); } catch (e) {}
       localStorage.setItem('withfit_login_session', JSON.stringify({ userId: username, lastActive: Date.now() }));
       try {
         const accSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'accounts', username));
@@ -1361,6 +1370,7 @@ export default function App() {
         if (j && j.token && j.username) {
           await signInWithCustomToken(auth, j.token);
           setCurrentUser(j.username);
+          try { localStorage.removeItem('withfit_explicit_logout'); } catch (e) {}
           localStorage.setItem('withfit_login_session', JSON.stringify({ userId: j.username, lastActive: Date.now() }));
           await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'accounts', j.username), { lastActive: Date.now(), isAppOnline: true }, { merge: true }).catch(() => {});
           return true;
@@ -1377,6 +1387,7 @@ export default function App() {
         if (userData.birthDate === birthDate) {
           const username = snap.docs[0].id;
           setCurrentUser(username);
+          try { localStorage.removeItem('withfit_explicit_logout'); } catch (e) {}
           localStorage.setItem('withfit_login_session', JSON.stringify({ userId: username, lastActive: Date.now() }));
           const joinedGyms = userData.joinedGyms || ['common'];
           await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'accounts', username), { lastActive: Date.now(), isAppOnline: true, joinedGyms }, { merge: true });
@@ -1387,7 +1398,7 @@ export default function App() {
     } catch (e) { return false; }
   };
 
-  const handleLogout = async () => { 
+  const handleLogout = async () => {
     if (!window.confirm("ログアウトしますか？")) return;
     if (currentUser && db) {
       try {
@@ -1396,7 +1407,12 @@ export default function App() {
       } catch (e) {}
     }
     localStorage.removeItem('withfit_login_session');
-    setCurrentUser(null); setCurrentTab('timeline'); setEditingPost(null); 
+    // 明示ログアウトの印を残し、Firebase認証も実際に終了させる。
+    // 認証が生き残っていると、残った認証セッションから前のユーザーを自動復元する
+    // 処理が働いて、別アカウントで入り直しても前のアカウントに戻ってしまう
+    try { localStorage.setItem('withfit_explicit_logout', '1'); } catch (e) {}
+    setCurrentUser(null); setCurrentTab('timeline'); setEditingPost(null);
+    try { if (auth) await signOut(auth); } catch (e) {}
   };
 
   const handleStartTraining = async (gymId) => {
