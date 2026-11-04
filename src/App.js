@@ -778,8 +778,9 @@ export default function App() {
 
   useEffect(() => {
     if (redirectUser && dataLoaded.accounts) {
-      handleGoogleLogin(redirectUser).then((ok) => {
-        if (!ok) alert('このGoogleアカウントに紐づくWithFitアカウントが見つかりませんでした。Googleでのログインは、先にユーザー名とPINで登録・ログインし、プロフィール設定からGoogle連携を済ませたアカウントで使えます。');
+      handleGoogleLogin(redirectUser).then((result) => {
+        if (result === 'notfound') alert('このGoogleアカウントに紐づくWithFitアカウントが見つかりませんでした。Googleでのログインは、先にユーザー名とPINで登録・ログインし、プロフィール設定からGoogle連携を済ませたアカウントで使えます。');
+        else if (result === 'error') alert('通信が不安定なため、Googleアカウントの確認ができませんでした。少し待ってもう一度お試しください。');
       });
       setRedirectUser(null);
     }
@@ -1255,7 +1256,7 @@ export default function App() {
   };
 
   const handleGoogleLogin = async (googleUser) => {
-    if (!db || !googleUser) return false;
+    if (!db || !googleUser) return 'error';
     try {
       let username = null;
       // 1) uidMap（認証UID→ユーザー名）で解決する
@@ -1264,21 +1265,32 @@ export default function App() {
         if (mapSnap.exists() && mapSnap.data().username) username = mapSnap.data().username;
       } catch (e) {}
       // 2) サーバーAPIで金庫（privateAccounts）の googleUid から解決する
+      // 404なら「未連携」が確定。それ以外の失敗（通信不良・認証まわりの一時エラー・
+      // レート制限）は未確定として1回だけ再試行し、確定できなければ 'error' を返す。
+      // 一時的な失敗を「紐づいていません」と誤報しないため
       if (!username) {
-        try {
-          const idToken = await googleUser.getIdToken();
-          const res = await fetch('/api/findUserByUid', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${idToken}` }
-          });
-          if (res.ok) {
-            const j = await res.json();
-            if (j && j.username) username = j.username;
-          }
-        } catch (e) {}
+        let definitive = false;
+        for (let attempt = 0; attempt < 2 && !username && !definitive; attempt++) {
+          if (attempt > 0) await new Promise(r => setTimeout(r, 1500));
+          try {
+            const idToken = await googleUser.getIdToken();
+            const res = await fetch('/api/findUserByUid', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${idToken}` }
+            });
+            if (res.ok) {
+              const j = await res.json();
+              if (j && j.username) username = j.username;
+              definitive = true;
+            } else if (res.status === 404) {
+              definitive = true;
+            }
+          } catch (e) { /* 通信失敗は未確定のまま再試行へ */ }
+        }
+        if (!username && !definitive) return 'error';
       }
       // 解決できない場合は推測でアカウントを作らない（誤った新規登録・別アカウント誤認を防ぐ）
-      if (!username) return false;
+      if (!username) return 'notfound';
       // uidMap を先に用意してから（ルールの本人判定で参照される）プロフィールを更新する
       try {
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'uidMap', googleUser.uid), { username }, { merge: true });
@@ -1290,8 +1302,8 @@ export default function App() {
         const joinedGyms = (accSnap.exists() ? accSnap.data()?.joinedGyms : null) || ['common'];
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'accounts', username), { lastActive: Date.now(), isAppOnline: true, joinedGyms }, { merge: true });
       } catch (e) {}
-      return true;
-    } catch (e) { return false; }
+      return 'ok';
+    } catch (e) { return 'error'; }
   };
 
   const handleLinkGoogle = async () => {
