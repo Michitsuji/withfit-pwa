@@ -303,6 +303,9 @@ export default function App() {
   const [loadTimeout, setLoadTimeout] = useState(false);
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [draftWorkoutItems, setDraftWorkoutItems] = useState([]);
+  // このセッションで一度でも種目が読み込まれた/追加されたか。起動直後の空状態で
+  // サーバー側の記録を消してしまう事故を防ぐためのガードに使う
+  const draftHadItemsRef = useRef(false);
   const [isDraftLoaded, setIsDraftLoaded] = useState(false);
   const [selectedCategories, setSelectedCategories] = useState([]);
   const [editingPost, setEditingPost] = useState(null);
@@ -841,8 +844,14 @@ export default function App() {
           const savedCats = localStorage.getItem(`withfit_cats_${currentUser}`);
           const lsTimestamp = Number(localStorage.getItem(`withfit_draft_time_${currentUser}`)) || 0;
           const fsTimestamp = docSnap.exists() ? (docSnap.data().draftUpdatedAt || 0) : 0;
+          const fsData = docSnap.exists() ? docSnap.data() : null;
 
-          if (savedDraft && (lsTimestamp >= fsTimestamp || !fsTimestamp)) {
+          if (fsData && fsData.isTraining && Array.isArray(fsData.currentWorkoutItems) && fsData.currentWorkoutItems.length > 0) {
+             // トレーニング中はサーバー側の記録が正。端末内の古い下書きに上書きされて
+             // 「記録が開けない」状態になるのを防ぐため、時刻比較より優先して復元する
+             setDraftWorkoutItems(fsData.currentWorkoutItems);
+             setSelectedCategories(fsData.currentSelectedCategories || []);
+          } else if (savedDraft && (lsTimestamp >= fsTimestamp || !fsTimestamp)) {
              setDraftWorkoutItems(JSON.parse(savedDraft));
              if (savedCats) setSelectedCategories(JSON.parse(savedCats));
           } else if (docSnap.exists() && docSnap.data().currentWorkoutItems) {
@@ -877,6 +886,10 @@ export default function App() {
   }, [accountsInfo[currentUser]?.currentWorkoutItems, accountsInfo[currentUser]?.lastUpdater, currentUser]);
 
   useEffect(() => {
+    if (draftWorkoutItems.length > 0) draftHadItemsRef.current = true;
+  }, [draftWorkoutItems]);
+
+  useEffect(() => {
     if (currentUser && db && isDraftLoaded) {
       try {
         if (draftWorkoutItems.length > 0 || selectedCategories.length > 0) {
@@ -890,7 +903,10 @@ export default function App() {
             draftUpdatedAt: now,
             lastUpdater: currentUser
           }, { merge: true }).catch(()=>{});
-        } else {
+        } else if (draftHadItemsRef.current) {
+          // 空になったので下書きを消す。ただし、このセッションで一度も種目を
+          // 保持していない場合は「復元がまだ済んでいないだけ」の可能性があるため、
+          // サーバー側の記録は消さない（起動直後の誤消去防止）
           localStorage.removeItem(`withfit_draft_${currentUser}`);
           localStorage.removeItem(`withfit_cats_${currentUser}`);
           localStorage.setItem(`withfit_draft_time_${currentUser}`, Date.now().toString());
@@ -2254,7 +2270,11 @@ export default function App() {
   const userTokenList = Array.isArray(myInfo.fcmTokens)
     ? myInfo.fcmTokens
     : (myInfo.fcmToken ? [myInfo.fcmToken] : []);
+  // 登録済み判定は「この端末にトークンがあり、通知が許可されている」ことを正とする。
+  // サーバー側のトークン一覧（myInfo経由）は金庫の購読タイミングで欠けることがあり、
+  // それを条件にすると、実際には通知が届いているのに「オンにする」が消えなくなる
   const isDeviceRegistered = Boolean(
+    (deviceFcmToken && osPermission === 'granted') ||
     (deviceFcmToken && userTokenList.includes(deviceFcmToken)) ||
     (osPermission === 'granted' && userTokenList.length > 0)
   );
