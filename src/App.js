@@ -150,16 +150,15 @@ export default function App() {
     }
   }, []);
 
-  // 起動ごとに現在の端末トークンを確認し、変わっていれば古いものを登録から外して
-  // 新しいものを登録し直す。FCMのWebトークンはブラウザ側の都合でローテーションされ、
+  // 端末トークンの鮮度確認。FCMのWebトークンはブラウザ側の都合でローテーションされ、
   // 放置するとサーバーに残った旧トークンへ送り続けて通知が全滅するため。
-  // 実際の取得は6時間に1回まで（画面復帰のたびに走らせない）
+  // 通常は6時間に1回まで間引くが、force=true（ログイン直後）は必ず取得し直して保存する
   const lastTokenCheckRef = useRef(0);
-  const ensurePushTokenFresh = useCallback(async () => {
+  const ensurePushTokenFresh = useCallback(async (force = false) => {
     if (!currentUser || typeof window === 'undefined' || !('Notification' in window)) return;
     if (Notification.permission !== 'granted') return;
     const now = Date.now();
-    if (now - lastTokenCheckRef.current < 6 * 60 * 60 * 1000) return;
+    if (!force && now - lastTokenCheckRef.current < 6 * 60 * 60 * 1000) return;
     lastTokenCheckRef.current = now;
     const token = await registerSwAndFetchToken();
     if (!token) return;
@@ -168,7 +167,7 @@ export default function App() {
       await removeDeviceTokenFromUserAccount(currentUser);
     }
     const savedAt = Number(localStorage.getItem('withfit_token_saved_at') || 0);
-    if (prev !== token || now - savedAt > 24 * 60 * 60 * 1000) {
+    if (force || prev !== token || now - savedAt > 24 * 60 * 60 * 1000) {
       await saveTokenToUserAccount(currentUser, token);
       try { localStorage.setItem('withfit_token_saved_at', String(now)); } catch (e) {}
     }
@@ -815,8 +814,14 @@ export default function App() {
 
     if ('Notification' in window) {
       if (Notification.permission === 'granted') {
-        // 起動ごとにトークンの鮮度を確認する（ローテーション追随）
-        ensurePushTokenFresh();
+        if (hasRefreshedTokenForUser.current !== currentUser) {
+          // ログインする度に、その時点の端末トークンを必ず取得し直して登録する
+          // （トークンは端末・ブラウザ側で差し替わることがあり、古い登録のままだと通知が届かない）
+          hasRefreshedTokenForUser.current = currentUser;
+          ensurePushTokenFresh(true);
+        } else {
+          ensurePushTokenFresh();
+        }
       } else {
         const hasPromptedThisSession = sessionStorage.getItem('withfit_push_prompted');
         if (!hasPromptedThisSession) {
