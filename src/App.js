@@ -609,6 +609,8 @@ export default function App() {
     const notifId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     let inAppSuccess = false;
     let pushSuccess = false;
+    let pushTokenCount = 0;
+    let pushDetails = [];
 
     // 1. アプリ内通知ドキュメントをFirestoreへ保存
     try {
@@ -650,13 +652,15 @@ export default function App() {
         if (res.ok) {
           const resJson = await res.json().catch(() => ({}));
           pushSuccess = Boolean(resJson.success);
+          pushTokenCount = typeof resJson.tokenCount === 'number' ? resJson.tokenCount : ((resJson.successCount || 0) + (resJson.failureCount || 0));
+          pushDetails = Array.isArray(resJson.details) ? resJson.details : [];
         }
       }
     } catch (e) {
       console.warn('Push API call error:', e);
     }
 
-    return { inAppSuccess, pushSuccess, tokenCount: pushSuccess ? 1 : 0 };
+    return { inAppSuccess, pushSuccess, tokenCount: pushTokenCount, pushDetails };
   }, [accountsInfo, currentUser]);
 
   const handleAddComment = async (postId, text, parentId = null) => {
@@ -2811,7 +2815,8 @@ export default function App() {
           if (res.pushSuccess) {
             alert(`${accountsInfo[targetUser]?.displayName || targetUser}さんへプッシュ通知とアプリ内通知を送信しました！`);
           } else if (res.inAppSuccess) {
-            alert(`${accountsInfo[targetUser]?.displayName || targetUser}さんへアプリ内通知を送信しました！（※Push登録端末数: ${res.tokenCount || 0}台）`);
+            const failReason = (res.pushDetails || []).filter(d => !d.ok).map(d => d.reason).filter(Boolean)[0];
+            alert(`${accountsInfo[targetUser]?.displayName || targetUser}さんへアプリ内通知を送信しました！（※Push登録端末数: ${res.tokenCount || 0}台${failReason ? `、プッシュ送信失敗: ${failReason}` : ''}）`);
           } else {
             alert('通知の送信に失敗しました。');
           }

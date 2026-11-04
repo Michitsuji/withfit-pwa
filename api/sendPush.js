@@ -301,11 +301,13 @@ async function verifyFirebaseIdToken(idToken, projectId) {
 // ------------------------------------------
 async function deliverTokens(tokens, safeTitle, safeBody, safeData) {
   const invalidTokens = [];
+  const details = [];
   const results = await Promise.allSettled(
     tokens.map(async (token) => {
       const kind = classifyToken(token);
       if (kind === 'invalid') {
         invalidTokens.push(token);
+        details.push({ kind, ok: false, reason: 'PlaceholderToken' });
         throw new Error('Placeholder token is not deliverable');
       }
       const result = kind === 'apns'
@@ -313,8 +315,10 @@ async function deliverTokens(tokens, safeTitle, safeBody, safeData) {
         : await sendViaFcm(token, safeTitle, safeBody, safeData);
       if (!result.ok) {
         if (result.invalid) invalidTokens.push(token);
+        details.push({ kind, ok: false, reason: result.reason || 'SendFailed' });
         throw new Error(result.reason || 'Send failed');
       }
+      details.push({ kind, ok: true });
       return result;
     })
   );
@@ -322,6 +326,7 @@ async function deliverTokens(tokens, safeTitle, safeBody, safeData) {
     successCount: results.filter(r => r.status === 'fulfilled').length,
     failureCount: results.filter(r => r.status === 'rejected').length,
     invalidTokens,
+    details,
   };
 }
 
@@ -388,7 +393,7 @@ module.exports = async function handler(req, res) {
     }
 
     if (tokens.length === 0) {
-      return res.status(200).json({ success: false, successCount: 0, failureCount: 0, invalidTokens: [], message: 'No device tokens for target user' });
+      return res.status(200).json({ success: false, successCount: 0, failureCount: 0, tokenCount: 0, invalidTokens: [], details: [], message: 'No device tokens for target user' });
     }
 
     const safeTitle = title || 'WithFit';
@@ -396,7 +401,7 @@ module.exports = async function handler(req, res) {
     const safeData = buildSafeData(data, safeTitle, safeBody);
 
     try {
-      const { successCount, failureCount, invalidTokens } = await deliverTokens(tokens, safeTitle, safeBody, safeData);
+      const { successCount, failureCount, invalidTokens, details } = await deliverTokens(tokens, safeTitle, safeBody, safeData);
 
       // 無効トークンの掃除もサーバー側で行う（privateAccounts と accounts の両方から除去）
       if (invalidTokens.length > 0) {
@@ -426,7 +431,7 @@ module.exports = async function handler(req, res) {
         }
       }
 
-      return res.status(200).json({ success: successCount > 0, successCount, failureCount, invalidTokens });
+      return res.status(200).json({ success: successCount > 0, successCount, failureCount, tokenCount: tokens.length, invalidTokens, details });
     } catch (error) {
       console.error('Error sending push message:', error);
       return res.status(500).json({ success: false, error: error.message });
