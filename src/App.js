@@ -263,6 +263,7 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState('timeline');
   const [isRecordManual, setIsRecordManual] = useState(false);
   const [isSessionChecked, setIsSessionChecked] = useState(false);
+  const [isAuthBusy, setIsAuthBusy] = useState(false);
 
   useEffect(() => {
     const sessionStr = localStorage.getItem('withfit_login_session');
@@ -1129,6 +1130,13 @@ export default function App() {
   // ルール側で「認証UID → ユーザー名」を引けるよう uidMap を維持する
   useEffect(() => {
     if (!db || !currentUser || !firebaseUser || !firebaseUser.uid) return;
+    // 認証UIDが今のユーザー本人のものである時だけ対応付けを書く
+    // （カスタムトークンは uid=ユーザー名／Google・Appleは金庫に登録された uid）。
+    // アカウント切り替え直後の一瞬など、他人の認証が残った状態で書いてしまうと
+    // 「別アカウントでログインしても前のアカウントが開く」誤対応付けの原因になる
+    const uid = firebaseUser.uid;
+    const priv = myPrivateRef.current || {};
+    if (uid !== currentUser && priv.googleUid !== uid && priv.appleUid !== uid) return;
     setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'uidMap', firebaseUser.uid), { username: currentUser }, { merge: true }).catch(() => {});
   }, [db, currentUser, firebaseUser]);
 
@@ -1265,41 +1273,40 @@ export default function App() {
 
   const handleGoogleLogin = async (googleUser) => {
     if (!db || !googleUser) return 'error';
+    setIsAuthBusy(true);
     try {
       let username = null;
-      // 1) uidMap（認証UID→ユーザー名）で解決する
-      try {
-        const mapSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'uidMap', googleUser.uid));
-        if (mapSnap.exists() && mapSnap.data().username) username = mapSnap.data().username;
-      } catch (e) {}
-      // 2) サーバーAPIで金庫（privateAccounts）の googleUid から解決する
-      // 404なら「未連携」が確定。それ以外の失敗（通信不良・認証まわりの一時エラー・
-      // レート制限）は未確定として1回だけ再試行し、確定できなければ 'error' を返す。
-      // 一時的な失敗を「紐づいていません」と誤報しないため
-      if (!username) {
-        let definitive = false;
-        for (let attempt = 0; attempt < 2 && !username && !definitive; attempt++) {
-          if (attempt > 0) await new Promise(r => setTimeout(r, 1500));
-          try {
-            const idToken = await googleUser.getIdToken();
-            const res = await fetch('/api/findUserByUid', {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${idToken}` }
-            });
-            if (res.ok) {
-              const j = await res.json();
-              if (j && j.username) username = j.username;
-              definitive = true;
-            } else if (res.status === 404) {
-              definitive = true;
-            }
-          } catch (e) { /* 通信失敗は未確定のまま再試行へ */ }
-        }
-        if (!username && !definitive) return 'error';
+      let serverDefinitive = false;
+      // 1) サーバーAPI（金庫の googleUid 照合）を正本として解決する。
+      // uidMap は古かったり誤って書かれたりし得るため、サーバーの答えを優先する。
+      // 404なら「未連携」が確定、それ以外の一時的失敗は1回だけ再試行する
+      for (let attempt = 0; attempt < 2 && !username && !serverDefinitive; attempt++) {
+        if (attempt > 0) await new Promise(r => setTimeout(r, 1500));
+        try {
+          const idToken = await googleUser.getIdToken();
+          const res = await fetch('/api/findUserByUid', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${idToken}` }
+          });
+          if (res.ok) {
+            const j = await res.json();
+            if (j && j.username) username = j.username;
+            serverDefinitive = true;
+          } else if (res.status === 404) {
+            serverDefinitive = true;
+          }
+        } catch (e) { /* 通信失敗は未確定のまま再試行へ */ }
       }
-      // 解決できない場合は推測でアカウントを作らない（誤った新規登録・別アカウント誤認を防ぐ）
-      if (!username) return 'notfound';
-      // uidMap を先に用意してから（ルールの本人判定で参照される）プロフィールを更新する
+      // 2) サーバーで確定できなかった時だけ uidMap を予備として使う
+      if (!username && !serverDefinitive) {
+        try {
+          const mapSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'uidMap', googleUser.uid));
+          if (mapSnap.exists() && mapSnap.data().username) username = mapSnap.data().username;
+        } catch (e) {}
+      }
+      if (!username) return serverDefinitive ? 'notfound' : 'error';
+      // uidMap をサーバーの答えに合わせて用意する（古い・誤った対応付けはここで直る。
+      // ルールの本人判定でも参照されるため、プロフィール更新より先に行う）
       try {
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'uidMap', googleUser.uid), { username }, { merge: true });
       } catch (e) {}
@@ -1313,6 +1320,7 @@ export default function App() {
       } catch (e) {}
       return 'ok';
     } catch (e) { return 'error'; }
+    finally { setIsAuthBusy(false); }
   };
 
   const handleLinkGoogle = async () => {
@@ -1343,6 +1351,7 @@ export default function App() {
       // googleUidはログイン情報なので金庫（privateAccounts）にだけ書く。
       // 公開側（accounts）に書くと、11/2の分離で消したはずの識別子が再び全員から読めてしまう
       await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'privateAccounts', currentUser), { googleUid: result.user.uid }, { merge: true });
+      try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'uidMap', result.user.uid), { username: currentUser }, { merge: true }); } catch (e) {}
       alert('Googleアカウントと連携しました。');
     } catch (e) {
       console.error(e);
@@ -2331,6 +2340,15 @@ export default function App() {
   }
 
   if (!currentUser) {
+    if (isAuthBusy) {
+      return (
+        <div className="h-screen overflow-hidden bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-6">
+          <Activity className="text-emerald-500 w-12 h-12 animate-pulse mb-6" />
+          <p className="text-slate-500 dark:text-slate-400 font-bold mb-4">Googleアカウントを確認中...</p>
+          <p className="text-slate-400 text-xs font-bold text-center">認証が終わるまでしばらくお待ちください</p>
+        </div>
+      );
+    }
     return <LoginScreen onLogin={handleLogin} onGoogleLogin={handleGoogleLogin} onSecretLogin={handleSecretLogin} isOnline={isOnline} />;
   }
 

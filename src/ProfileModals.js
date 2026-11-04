@@ -567,6 +567,7 @@ function LoginScreen({ onLogin, onGoogleLogin, onSecretLogin, isOnline }) {
   const [secretBirthDate, setSecretBirthDate] = useState('');
   const [secretError, setSecretError] = useState('');
   const [isSecretSubmitting, setIsSecretSubmitting] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
   
   const handleOnlineTap = () => {
     const newCount = secretTapCount + 1;
@@ -636,16 +637,17 @@ function LoginScreen({ onLogin, onGoogleLogin, onSecretLogin, isOnline }) {
                    <AdBanner />
                  </div>
                </div>
-               <button 
+               <button
                  type="button"
-                 disabled={!agreed}
-                 onClick={async () => { 
+                 disabled={!agreed || googleBusy}
+                 onClick={async () => {
                    const isWebView = typeof window !== 'undefined' && window.ReactNativeWebView;
                    if (isWebView) {
                      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'REQUEST_GOOGLE_LOGIN' }));
                    } else {
-                     const provider = new GoogleAuthProvider(); 
-                     provider.setCustomParameters({ prompt: 'select_account' }); 
+                     setGoogleBusy(true);
+                     const provider = new GoogleAuthProvider();
+                     provider.setCustomParameters({ prompt: 'select_account' });
                      try {
                        const result = await signInWithPopup(getAuth(), provider);
                        if (result && result.user) {
@@ -663,12 +665,14 @@ function LoginScreen({ onLogin, onGoogleLogin, onSecretLogin, isOnline }) {
                        } else if (err.code !== 'auth/popup-closed-by-user') {
                          alert('Googleログインに失敗しました。ポップアップブロックを解除するか、下の「フレンドコードでログイン」をお試しください。');
                        }
+                     } finally {
+                       setGoogleBusy(false);
                      }
                    }
-                 }} 
-                 className={`w-full font-bold py-3 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-colors border ${agreed ? 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50' : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'}`}
-               > 
-                 Googleでログイン / 登録
+                 }}
+                 className={`w-full font-bold py-3 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-colors border ${agreed && !googleBusy ? 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50' : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'}`}
+               >
+                 {googleBusy ? 'Googleアカウントを確認中…' : 'Googleでログイン / 登録'}
                </button>
                <button
                  type="button"
