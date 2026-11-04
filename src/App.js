@@ -778,7 +778,9 @@ export default function App() {
 
   useEffect(() => {
     if (redirectUser && dataLoaded.accounts) {
-      handleGoogleLogin(redirectUser);
+      handleGoogleLogin(redirectUser).then((ok) => {
+        if (!ok) alert('このGoogleアカウントに紐づくWithFitアカウントが見つかりませんでした。Googleでのログインは、先にユーザー名とPINで登録・ログインし、プロフィール設定からGoogle連携を済ませたアカウントで使えます。');
+      });
       setRedirectUser(null);
     }
   }, [redirectUser, dataLoaded.accounts]);
@@ -1301,13 +1303,25 @@ export default function App() {
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
-      const existingUser = Object.entries(accountsInfo).find(([uname, data]) => data.googleUid === result.user.uid);
-      if (existingUser && existingUser[0] !== currentUser) {
-        alert('このGoogleアカウントは既に別のアカウントに紐づけられています。');
-        return;
-      }
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'accounts', currentUser), { googleUid: result.user.uid }, { merge: true });
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'privateAccounts', currentUser), { googleUid: result.user.uid }, { merge: true }).catch(() => {});
+      // 重複連携チェックはサーバー経由で行う（googleUidは金庫側に分離され、
+      // クライアントのaccountsInfoからは見えないため、従来の照合は機能していなかった）
+      try {
+        const idToken = await result.user.getIdToken();
+        const res = await fetch('/api/findUserByUid', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${idToken}` }
+        });
+        if (res.ok) {
+          const j = await res.json().catch(() => null);
+          if (j && j.username && j.username !== currentUser) {
+            alert('このGoogleアカウントは既に別のアカウントに紐づけられています。');
+            return;
+          }
+        }
+      } catch (e) {}
+      // googleUidはログイン情報なので金庫（privateAccounts）にだけ書く。
+      // 公開側（accounts）に書くと、11/2の分離で消したはずの識別子が再び全員から読めてしまう
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'privateAccounts', currentUser), { googleUid: result.user.uid }, { merge: true });
       alert('Googleアカウントと連携しました。');
     } catch (e) {
       console.error(e);

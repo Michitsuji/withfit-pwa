@@ -649,7 +649,10 @@ function LoginScreen({ onLogin, onGoogleLogin, onSecretLogin, isOnline }) {
                      try {
                        const result = await signInWithPopup(getAuth(), provider);
                        if (result && result.user) {
-                         await onGoogleLogin(result.user);
+                         const ok = await onGoogleLogin(result.user);
+                         if (!ok) {
+                           alert('このGoogleアカウントに紐づくWithFitアカウントが見つかりませんでした。Googleでのログインは、先にユーザー名とPINで登録・ログインし、プロフィール設定からGoogle連携を済ませたアカウントで使えます。');
+                         }
                        }
                      } catch (err) {
                        console.error(err);
