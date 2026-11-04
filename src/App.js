@@ -837,11 +837,21 @@ export default function App() {
   useEffect(() => {
     if (currentUser && db) {
       const loadDraft = async () => {
+        // 端末内の下書きは先に確保する。サーバーへの接続が切れている（認証切れ等）場合でも、
+        // 手元の記録は必ず復元できるようにするため
+        const savedDraft = localStorage.getItem(`withfit_draft_${currentUser}`);
+        const savedCats = localStorage.getItem(`withfit_cats_${currentUser}`);
+        const applyLocalDraft = () => {
+          if (savedDraft) {
+            try { setDraftWorkoutItems(JSON.parse(savedDraft)); } catch (e) {}
+            if (savedCats) { try { setSelectedCategories(JSON.parse(savedCats)); } catch (e) {} }
+            return true;
+          }
+          return false;
+        };
         try {
           const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'accounts', currentUser);
           const docSnap = await getDoc(docRef);
-          const savedDraft = localStorage.getItem(`withfit_draft_${currentUser}`);
-          const savedCats = localStorage.getItem(`withfit_cats_${currentUser}`);
           const lsTimestamp = Number(localStorage.getItem(`withfit_draft_time_${currentUser}`)) || 0;
           const fsTimestamp = docSnap.exists() ? (docSnap.data().draftUpdatedAt || 0) : 0;
           const fsData = docSnap.exists() ? docSnap.data() : null;
@@ -862,7 +872,9 @@ export default function App() {
              if (savedCats) setSelectedCategories(JSON.parse(savedCats));
           }
         } catch (e) {
-          console.error("Failed to load draft", e);
+          // サーバーから読めなかった場合は端末内の下書きで復元する（接続不良で記録を失わないため）
+          console.error("Failed to load draft from server, falling back to local draft", e);
+          applyLocalDraft();
         } finally {
           setIsDraftLoaded(true);
         }
@@ -1077,6 +1089,35 @@ export default function App() {
     }, () => {});
     return () => unsub();
   }, [db, currentUser]);
+
+  // 認証セッションの健全性チェック:
+  // アプリ側のログイン状態（withfit_login_session）が残っていても、Firebase認証の
+  // 実セッションが失効・匿名化していると、金庫（privateAccounts）が読めず、
+  // プレゼンスも下書き同期も全て止まった「ゾンビ状態」になる（オンライン表示もされない）。
+  // その場合は一度ログアウトしてログイン画面に戻し、フレンドコード＋生年月日で
+  // 正規のカスタムトークンを取り直させる。ネットワーク不良では誤爆しないよう、
+  // permission-denied の時だけ発動する
+  const authHealthCheckedRef = useRef('');
+  useEffect(() => {
+    if (!db || !currentUser || !isSessionChecked) return;
+    if (authHealthCheckedRef.current === currentUser) return;
+    authHealthCheckedRef.current = currentUser;
+    let cancelled = false;
+    (async () => {
+      await new Promise(r => setTimeout(r, 2500));
+      if (cancelled) return;
+      try {
+        await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'privateAccounts', currentUser));
+      } catch (e) {
+        if (!cancelled && e && e.code === 'permission-denied') {
+          try { localStorage.removeItem('withfit_login_session'); } catch (err) {}
+          setCurrentUser(null);
+          alert('ログインセッションの有効期限が切れていました。お手数ですが、フレンドコードと生年月日でもう一度ログインしてください。');
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [db, currentUser, isSessionChecked]);
 
   // ルール側で「認証UID → ユーザー名」を引けるよう uidMap を維持する
   useEffect(() => {
