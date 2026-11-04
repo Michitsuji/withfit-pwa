@@ -757,28 +757,28 @@ function WorkoutItemForm({ item, index, availableExercises, allGymExercises = []
       inputContent = (
         <div className="flex-1 flex flex-col gap-1.5 min-w-0">
           {isBodyWeight && (
-            <div className="flex items-center gap-1.5">
+            <div className="grid grid-cols-2 gap-1.5 w-full">
               <button
                 type="button"
                 onClick={() => handleSelectBodyWeightSign('+')}
-                className={`flex-1 py-1 px-2 rounded-lg text-[11px] font-bold border transition-colors flex items-center justify-center gap-1 ${
+                className={`w-full h-7 px-1 rounded-lg text-[11px] font-bold border transition-colors flex items-center justify-center whitespace-nowrap ${
                   !isAssist
                     ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm'
                     : 'bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
                 }`}
               >
-                ＋（荷重）
+                ＋(荷重)
               </button>
               <button
                 type="button"
                 onClick={() => handleSelectBodyWeightSign('-')}
-                className={`flex-1 py-1 px-2 rounded-lg text-[11px] font-bold border transition-colors flex items-center justify-center gap-1 ${
+                className={`w-full h-7 px-1 rounded-lg text-[11px] font-bold border transition-colors flex items-center justify-center whitespace-nowrap ${
                   isAssist
                     ? 'bg-sky-500 text-white border-sky-500 shadow-sm'
                     : 'bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
                 }`}
               >
-                －（アシスト）
+                －(アシスト)
               </button>
             </div>
           )}

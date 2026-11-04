@@ -150,6 +150,30 @@ export default function App() {
     }
   }, []);
 
+  // 起動ごとに現在の端末トークンを確認し、変わっていれば古いものを登録から外して
+  // 新しいものを登録し直す。FCMのWebトークンはブラウザ側の都合でローテーションされ、
+  // 放置するとサーバーに残った旧トークンへ送り続けて通知が全滅するため。
+  // 実際の取得は6時間に1回まで（画面復帰のたびに走らせない）
+  const lastTokenCheckRef = useRef(0);
+  const ensurePushTokenFresh = useCallback(async () => {
+    if (!currentUser || typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    const now = Date.now();
+    if (now - lastTokenCheckRef.current < 6 * 60 * 60 * 1000) return;
+    lastTokenCheckRef.current = now;
+    const token = await registerSwAndFetchToken();
+    if (!token) return;
+    const prev = localStorage.getItem(DEVICE_TOKEN_STORAGE_KEY);
+    if (prev && prev !== token) {
+      await removeDeviceTokenFromUserAccount(currentUser);
+    }
+    const savedAt = Number(localStorage.getItem('withfit_token_saved_at') || 0);
+    if (prev !== token || now - savedAt > 24 * 60 * 60 * 1000) {
+      await saveTokenToUserAccount(currentUser, token);
+      try { localStorage.setItem('withfit_token_saved_at', String(now)); } catch (e) {}
+    }
+  }, [currentUser, registerSwAndFetchToken, removeDeviceTokenFromUserAccount, saveTokenToUserAccount]);
+
   useEffect(() => {
     if (currentUser && pendingPushToken.current) {
       saveTokenToUserAccount(currentUser, pendingPushToken.current);
@@ -782,14 +806,8 @@ export default function App() {
 
     if ('Notification' in window) {
       if (Notification.permission === 'granted') {
-        if (hasRefreshedTokenForUser.current !== currentUser) {
-          hasRefreshedTokenForUser.current = currentUser;
-          registerSwAndFetchToken().then((token) => {
-            if (token) {
-              saveTokenToUserAccount(currentUser, token);
-            }
-          });
-        }
+        // 起動ごとにトークンの鮮度を確認する（ローテーション追随）
+        ensurePushTokenFresh();
       } else {
         const hasPromptedThisSession = sessionStorage.getItem('withfit_push_prompted');
         if (!hasPromptedThisSession) {
@@ -801,7 +819,17 @@ export default function App() {
         }
       }
     }
-  }, [currentUser, dataLoaded.accounts, accountsInfo, registerSwAndFetchToken, saveTokenToUserAccount]);
+  }, [currentUser, dataLoaded.accounts, accountsInfo, ensurePushTokenFresh]);
+
+  // 長時間バックグラウンドにいた後に戻ってきた時もトークンを確認する（内部で6時間に1回まで間引く）
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') ensurePushTokenFresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [ensurePushTokenFresh]);
 
   useEffect(() => {
     if (currentUser && db) {

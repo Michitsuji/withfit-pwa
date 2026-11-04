@@ -1,5 +1,8 @@
 // ==========================================
 // firebase-messaging-sw.js — バックグラウンドプッシュ通知＆クリック制御用 Service Worker
+// 注意: ここの apiKey はアプリ本体（Vercel環境変数 REACT_APP_FIREBASE_API_KEY）と
+// 必ず一致させること。2026-11-02 のキー回転で本体だけ新キーになり、このファイルの
+// 旧キーが無効化されてPWAのバックグラウンド通知が全滅した前科がある。
 // ==========================================
 importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js');
@@ -13,7 +16,7 @@ self.addEventListener('activate', (event) => {
 });
 
 firebase.initializeApp({
-  apiKey: "AIzaSyDQTfLhyuc8PEoMtw-FvEq4k9HShRJz_io",
+  apiKey: "AIzaSyAb2qyieNxcnStpI94ETyD9HDtPseOYwd8",
   authDomain: "duofit-app-75cb2.firebaseapp.com",
   projectId: "duofit-app-75cb2",
   storageBucket: "duofit-app-75cb2.firebasestorage.app",
