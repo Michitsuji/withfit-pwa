@@ -82,36 +82,46 @@ export default function App() {
   }, []);
 
   // 現在の端末のトークンのみをユーザーのFirestoreドキュメントから削除するヘルパー（他端末のトークンは壊さない）
-  const removeDeviceTokenFromUserAccount = useCallback(async (username) => {
+  // tokenOverride があればそのトークンを、無ければこの端末に保存済みのトークンを対象にする。
+  // 対象トークンを特定できない場合はDBに触らない（端末側の保存が消えている状態で
+  // 全トークンを消してしまう事故を防ぐため。他端末の登録まで巻き込まない）
+  const removeDeviceTokenFromUserAccount = useCallback(async (username, tokenOverride = null) => {
     if (!username || !db) return;
-    const localToken = typeof window !== 'undefined' ? localStorage.getItem(DEVICE_TOKEN_STORAGE_KEY) : deviceFcmToken;
+    const localToken = tokenOverride
+      || (typeof window !== 'undefined' ? localStorage.getItem(DEVICE_TOKEN_STORAGE_KEY) : null)
+      || deviceFcmToken;
     try {
-      // 保存先（privateAccounts）と移行元の accounts の両方から、この端末のトークンを除去する
-      for (const collName of ['privateAccounts', 'accounts']) {
-        const userRef = doc(db, 'artifacts', appId, 'public', 'data', collName, username);
-        const snap = await getDoc(userRef);
-        if (snap.exists()) {
-          const data = snap.data();
-          const existingTokens = Array.isArray(data.fcmTokens)
-            ? data.fcmTokens
-            : (data.fcmToken ? [data.fcmToken] : []);
-          if (localToken && !existingTokens.includes(localToken) && data.fcmToken !== localToken) continue;
-          const remainingTokens = localToken
-            ? existingTokens.filter(t => t && t !== localToken)
-            : [];
-          const nextPrimary = remainingTokens.length > 0 ? remainingTokens[remainingTokens.length - 1] : deleteField();
+      if (localToken) {
+        // 保存先（privateAccounts）と移行元の accounts の両方から、この端末のトークンを除去する
+        for (const collName of ['privateAccounts', 'accounts']) {
+          const userRef = doc(db, 'artifacts', appId, 'public', 'data', collName, username);
+          const snap = await getDoc(userRef);
+          if (snap.exists()) {
+            const data = snap.data();
+            const existingTokens = Array.isArray(data.fcmTokens)
+              ? data.fcmTokens
+              : (data.fcmToken ? [data.fcmToken] : []);
+            if (!existingTokens.includes(localToken) && data.fcmToken !== localToken) continue;
+            const remainingTokens = existingTokens.filter(t => t && t !== localToken);
+            const nextPrimary = remainingTokens.length > 0 ? remainingTokens[remainingTokens.length - 1] : deleteField();
 
-          await setDoc(userRef, {
-            fcmTokens: remainingTokens,
-            fcmToken: nextPrimary,
-            fcmTokenUpdatedAt: Date.now()
-          }, { merge: true });
+            await setDoc(userRef, {
+              fcmTokens: remainingTokens,
+              fcmToken: nextPrimary,
+              fcmTokenUpdatedAt: Date.now()
+            }, { merge: true });
+          }
         }
       }
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem(DEVICE_TOKEN_STORAGE_KEY);
+      // 端末側の保存は「今のトークン」を消したときだけクリアする
+      // （旧トークンの後始末で、保存済みの現行トークンまで消さないため）
+      const storedNow = typeof window !== 'undefined' ? localStorage.getItem(DEVICE_TOKEN_STORAGE_KEY) : null;
+      if (!storedNow || storedNow === localToken) {
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem(DEVICE_TOKEN_STORAGE_KEY);
+        }
+        setDeviceFcmToken(null);
       }
-      setDeviceFcmToken(null);
     } catch (e) {
       console.error('Failed to remove device FCM token:', e);
     }
@@ -163,13 +173,14 @@ export default function App() {
     const token = await registerSwAndFetchToken();
     if (!token) return;
     const prev = localStorage.getItem(DEVICE_TOKEN_STORAGE_KEY);
-    if (prev && prev !== token) {
-      await removeDeviceTokenFromUserAccount(currentUser);
-    }
     const savedAt = Number(localStorage.getItem('withfit_token_saved_at') || 0);
     if (force || prev !== token || now - savedAt > 24 * 60 * 60 * 1000) {
       await saveTokenToUserAccount(currentUser, token);
       try { localStorage.setItem('withfit_token_saved_at', String(now)); } catch (e) {}
+    }
+    if (prev && prev !== token) {
+      // 新トークンを保存してから旧トークンを外す（途中で通信が切れても登録が0件にならない順序にする）
+      await removeDeviceTokenFromUserAccount(currentUser, prev);
     }
   }, [currentUser, registerSwAndFetchToken, removeDeviceTokenFromUserAccount, saveTokenToUserAccount]);
 

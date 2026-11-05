@@ -403,13 +403,47 @@ module.exports = async function handler(req, res) {
     try {
       const { successCount, failureCount, invalidTokens, details } = await deliverTokens(tokens, safeTitle, safeBody, safeData);
 
-      // 無効トークンの掃除もサーバー側で行う（privateAccounts と accounts の両方から除去）
-      if (invalidTokens.length > 0) {
-        try {
-          const { getFirestore, FieldValue } = require('firebase-admin/firestore');
-          const db2 = getFirestore();
+      // 無効トークンの掃除もサーバー側で行う（privateAccounts と accounts の両方から除去）。
+      // ただし即時削除はしない。設定事故やキー入れ替え等で正常なトークンまで
+      // 一斉に無効判定されると登録が全滅するため、「別の送信機会でも無効」かつ
+      // 「最初の無効判定から3時間以上経過」の両方を満たしたものだけを削除する。
+      // 判定履歴は pushTokenHealth（キー=トークンのSHA-256）に残し、配信に
+      // 成功したトークンの履歴はその都度リセットする。
+      try {
+        const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+        const db2 = getFirestore();
+        const base2 = 'artifacts/withfit-app/public/data';
+        const nowMs = Date.now();
+        const hashOf = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
+        const invalidSet = new Set(invalidTokens);
+
+        // 成功したトークンの失敗履歴は消す
+        for (const t of tokens) {
+          if (invalidSet.has(t)) continue;
+          try { await db2.doc(`${base2}/pushTokenHealth/${hashOf(t)}`).delete(); } catch (e) {}
+        }
+
+        // 無効判定が出たトークンは履歴を更新し、確定したものだけ削除対象にする
+        const confirmedInvalid = [];
+        for (const t of invalidTokens) {
+          const hRef = db2.doc(`${base2}/pushTokenHealth/${hashOf(t)}`);
+          try {
+            const hSnap = await hRef.get();
+            const h = hSnap.exists ? (hSnap.data() || {}) : {};
+            const firstInvalidAt = typeof h.firstInvalidAt === 'number' ? h.firstInvalidAt : nowMs;
+            const fails = (typeof h.fails === 'number' ? h.fails : 0) + 1;
+            await hRef.set({ fails, firstInvalidAt, lastInvalidAt: nowMs, targetUserId }, { merge: true });
+            if (fails >= 2 && nowMs - firstInvalidAt >= 3 * 60 * 60 * 1000) {
+              confirmedInvalid.push(t);
+            }
+          } catch (e) {
+            console.warn('Token health tracking failed:', e);
+          }
+        }
+
+        if (confirmedInvalid.length > 0) {
           for (const collName of ['privateAccounts', 'accounts']) {
-            const ref = db2.doc(`artifacts/withfit-app/public/data/${collName}/${targetUserId}`);
+            const ref = db2.doc(`${base2}/${collName}/${targetUserId}`);
             const snap2 = await ref.get();
             if (snap2.exists) {
               const acc2 = snap2.data() || {};
@@ -417,8 +451,8 @@ module.exports = async function handler(req, res) {
                 ...(Array.isArray(acc2.fcmTokens) ? acc2.fcmTokens : []),
                 acc2.fcmToken
               ].filter(t => typeof t === 'string' && t.trim().length > 0))];
-              if (current.some(t => invalidTokens.includes(t))) {
-                const valid = current.filter(t => !invalidTokens.includes(t));
+              if (current.some(t => confirmedInvalid.includes(t))) {
+                const valid = current.filter(t => !confirmedInvalid.includes(t));
                 await ref.update({
                   fcmTokens: valid,
                   fcmToken: valid.length > 0 ? valid[valid.length - 1] : FieldValue.delete()
@@ -426,9 +460,12 @@ module.exports = async function handler(req, res) {
               }
             }
           }
-        } catch (e) {
-          console.warn('Token cleanup failed:', e);
+          for (const t of confirmedInvalid) {
+            try { await db2.doc(`${base2}/pushTokenHealth/${hashOf(t)}`).delete(); } catch (e) {}
+          }
         }
+      } catch (e) {
+        console.warn('Token cleanup failed:', e);
       }
 
       return res.status(200).json({ success: successCount > 0, successCount, failureCount, tokenCount: tokens.length, invalidTokens, details });
