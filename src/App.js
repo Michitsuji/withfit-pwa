@@ -313,6 +313,31 @@ export default function App() {
   const [dataLoaded, setDataLoaded] = useState({ accounts: false, gyms: false, exercises: false, workouts: false });
   const [loadTimeout, setLoadTimeout] = useState(false);
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  // ---- サービス終了フラグ（移行当日、サーバー側で serviceStatus/global.ended を true にすると全画面が終了告知になる） ----
+  const [serviceEnded, setServiceEnded] = useState(false);
+  const [serviceMessage, setServiceMessage] = useState('');
+  const [myFriendCode, setMyFriendCode] = useState('');
+  useEffect(() => {
+    if (!db) return undefined;
+    const ref = doc(db, 'artifacts', appId, 'public', 'data', 'serviceStatus', 'global');
+    const unsub = onSnapshot(ref, (snap) => {
+      if (snap.exists()) {
+        const d = snap.data() || {};
+        setServiceEnded(d.ended === true);
+        setServiceMessage(typeof d.message === 'string' ? d.message : '');
+      } else {
+        setServiceEnded(false);
+      }
+    }, () => {});
+    return () => { try { unsub(); } catch (e) {} };
+  }, []);
+  useEffect(() => {
+    if (!serviceEnded || !currentUser || !db) return;
+    getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'privateAccounts', currentUser))
+      .then((s) => { if (s.exists()) setMyFriendCode(s.data().friendCode || ''); })
+      .catch(() => {});
+  }, [serviceEnded, currentUser]);
   const [draftWorkoutItems, setDraftWorkoutItems] = useState([]);
   // このセッションで一度でも種目が読み込まれた/追加されたか。起動直後の空状態で
   // サーバー側の記録を消してしまう事故を防ぐためのガードに使う
@@ -2378,6 +2403,30 @@ export default function App() {
         </div>
         <p className="text-emerald-600 dark:text-emerald-400 font-bold text-sm mb-4">{loadingProgress}%</p>
         <p className="text-slate-400 text-xs font-bold text-center">完了するまでしばらくお待ちください</p>
+      </div>
+    );
+  }
+
+  if (serviceEnded) {
+    return (
+      <div className="min-h-screen w-full bg-slate-50 flex flex-col items-center justify-center p-6">
+        <div className="w-full max-w-sm bg-white p-6 rounded-3xl border border-slate-200 shadow-xl text-center">
+          <WithFitLogo size={56} className="text-slate-700 mx-auto" />
+          <h1 className="text-xl font-black text-slate-800 mt-3 mb-2">WithFitはサービスを終了しました</h1>
+          <p className="text-sm font-bold text-slate-500 leading-relaxed">
+            長らくのご利用ありがとうございました。WithFitは新アプリ「CoGrit」へ移行しました。あなたのトレーニング記録は、CoGritでそのまま引き継ぐことができます。
+          </p>
+          {serviceMessage && <p className="text-sm font-bold text-slate-600 leading-relaxed mt-3">{serviceMessage}</p>}
+          {myFriendCode ? (
+            <div className="mt-5 bg-slate-50 border border-slate-200 rounded-2xl p-4">
+              <p className="text-xs font-bold text-slate-500 mb-1">あなたの引き継ぎ用フレンドコード</p>
+              <p className="text-2xl font-black tracking-widest text-slate-800">{myFriendCode}</p>
+              <p className="text-[11px] font-bold text-slate-400 mt-2 leading-relaxed">CoGritの登録画面で「WithFitからデータを引き継ぐ」を選び、このコードと生年月日を入力してください。このコードは大切に保管してください。</p>
+            </div>
+          ) : (
+            <p className="text-xs font-bold text-slate-400 leading-relaxed mt-5">引き継ぎにはWithFitのフレンドコードが必要です。コードが分からない場合は、運営（cogrit.app@gmail.com）までご連絡ください。</p>
+          )}
+        </div>
       </div>
     );
   }
